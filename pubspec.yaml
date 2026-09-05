@@ -1,0 +1,19 @@
+name: json_env
+description: Generates a Dart env class from a JSON Schema and a .env file at build time, validating every value and obfuscating the ones marked as secret.
+version: 0.1.0
+repository: https://github.com/ReAppIt/json_env
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  analyzer: ">=8.0.0 <14.0.0"
+  build: ^4.0.3
+  path: ^1.9.0
+  source_gen: ^4.1.1
+
+dev_dependencies:
+  build_runner: ^2.7.0
+  build_test: ^3.0.0
+  lints: ^6.0.0
+  test: ^1.26.0
