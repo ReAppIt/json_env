@@ -28,7 +28,7 @@ final class EnvField {
   final String? description;
   final String? defaultValue;
 
-  /// `POSTHOG_HOST` → `posthogHost`.
+  /// `APP_ORIGIN` → `appOrigin`.
   String get fieldName => key.toLowerCase().replaceAllMapped(
     RegExp('_([a-z0-9])'),
     (match) => match[1]!.toUpperCase(),
