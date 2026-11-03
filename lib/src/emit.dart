@@ -25,8 +25,7 @@ String emitEnvClass({
     final name = field.fieldName;
     if (field.description != null) buffer.writeln('  /// ${field.description}');
     if (!field.obfuscate || value.isEmpty) {
-      final literal = value.isEmpty ? field.defaultValue ?? '' : value;
-      buffer.writeln("  static const String $name = '${_escape(literal)}';");
+      buffer.writeln("  static const String $name = '${_escape(value)}';");
       continue;
     }
     final units = value.codeUnits;

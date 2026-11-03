@@ -1,11 +1,12 @@
 # json_env
 
 A `build_runner` builder that generates a Dart env class from a JSON Schema
-and a dotenv file. Every value is validated against the schema at build time,
-and keys marked `obfuscate` are baked XOR-obfuscated instead of as literals.
+and a JSON object of values. Keys marked `obfuscate` are baked XOR-obfuscated
+instead of as literals.
 
-The schema is data, so it can come from anywhere: hand-written, or exported
-from a TypeScript declaration with zod's `z.toJSONSchema`.
+It validates nothing: check the values before the build and write what passed
+as the values file. With zod, `z.toJSONSchema` exports the schema and `parse`
+output is the values file, so one declaration drives both.
 
 ## Usage
 
@@ -20,7 +21,7 @@ dev_dependencies:
 ```
 
 `build.yaml` — both files live at the package root, so list them as sources
-(hidden paths such as `.env` are otherwise invisible to build_runner):
+(hidden paths such as `.env.json` are otherwise invisible to build_runner):
 
 ```yaml
 targets:
@@ -28,7 +29,7 @@ targets:
     sources:
       - $package$
       - lib/**
-      - .env
+      - .env.json
       - env.schema.json
 ```
 
@@ -43,18 +44,25 @@ import 'package:json_env/json_env.dart';
 part 'env.g.dart';
 ```
 
-`env.schema.json`:
+`env.schema.json` — only `properties` is read, and of each property only
+`obfuscate` and `description`:
 
 ```json
 {
   "type": "object",
   "properties": {
     "APP_ORIGIN": { "type": "string", "const": "myapp" },
-    "API_KEY": { "type": "string", "pattern": "^phc_[A-Za-z0-9]+$", "obfuscate": true },
+    "API_KEY": { "type": "string", "obfuscate": true },
     "OPTIONAL_KEY": { "type": "string", "description": "Empty when unset." }
-  },
-  "required": ["APP_ORIGIN", "API_KEY"]
+  }
 }
+```
+
+`.env.json` — the validated values, all strings. A declared key it lacks is
+baked as `''`; a key the schema does not declare is ignored:
+
+```json
+{ "APP_ORIGIN": "myapp", "API_KEY": "phc_abc123" }
 ```
 
 `dart run build_runner build` then emits `env.g.dart`:
@@ -69,13 +77,6 @@ abstract final class Env {
 ```
 
 Field names are the camelCase form of the keys. `@JsonEnv` takes
-`className` (default `Env`) and `env` (default `.env`).
-
-## What is validated
-
-For each declared key: required keys must be present and non-empty; a present
-value must satisfy `const`, `enum`, `minLength`, `maxLength`, every `pattern`
-(directly or inside `allOf`), and `format: "uri"` (scheme and host). Errors
-name the key and the rule, never the value. Keys in the dotenv file that the
-schema does not declare are ignored, so a folder-wide export is fine. Other
-JSON Schema keywords are ignored.
+`className` (default `Env`) and `values` (default `.env.json`). A values
+file that is not a JSON object of strings fails the build, naming the key,
+never the value.

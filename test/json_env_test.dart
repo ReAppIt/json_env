@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:build/build.dart';
 import 'package:build_test/build_test.dart';
 import 'package:json_env/builder.dart';
-import 'package:json_env/src/dotenv.dart';
 import 'package:json_env/src/schema.dart';
+import 'package:json_env/src/values.dart';
 import 'package:test/test.dart';
 
 const schema = '''
@@ -14,8 +14,7 @@ const schema = '''
     "APP_ORIGIN": {"type": "string", "const": "myapp"},
     "API_KEY": {
       "type": "string",
-      "minLength": 1,
-      "allOf": [{"pattern": "^phc_[A-Za-z0-9]+\$"}],
+      "pattern": "^phc_[A-Za-z0-9]+\$",
       "obfuscate": true,
       "description": "The project key."
     },
@@ -27,7 +26,7 @@ const schema = '''
 ''';
 
 const library = '''
-@JsonEnv('test/env.schema.json', env: 'test/.env')
+@JsonEnv('test/env.schema.json', values: 'test/.env.json')
 library;
 
 import 'package:json_env/json_env.dart';
@@ -35,36 +34,37 @@ import 'package:json_env/json_env.dart';
 part 'env.g.dart';
 ''';
 
-const validEnv = '''
-# comment
-APP_ORIGIN='myapp'
-API_KEY="phc_abc123"
-HOST=https://in9.example
-UNRELATED=ignored
+const validValues = '''
+{
+  "APP_ORIGIN": "myapp",
+  "API_KEY": "phc_abc123",
+  "HOST": "https://in9.example",
+  "UNRELATED": "ignored"
+}
 ''';
 
-Future<TestBuilderResult> build(String env) => testBuilder(
+Future<TestBuilderResult> build(String values) => testBuilder(
   jsonEnvBuilder(BuilderOptions.empty),
   {
     'json_env|lib/json_env.dart': File('lib/json_env.dart').readAsStringSync(),
     'a|test/env.schema.json': schema,
-    'a|test/.env': env,
+    'a|test/.env.json': values,
     'a|lib/env.dart': library,
   },
   rootPackage: 'a',
   flattenOutput: true,
 );
 
-Future<String> generate(String env) async {
-  final result = await build(env);
+Future<String> generate(String values) async {
+  final result = await build(values);
   expect(result.succeeded, isTrue, reason: result.errors.join('\n'));
   return result.readerWriter.testing.readString(
     AssetId('a', 'lib/env.json_env.g.part'),
   );
 }
 
-Future<String> failure(String env) async {
-  final result = await build(env);
+Future<String> failure(String values) async {
+  final result = await build(values);
   expect(result.succeeded, isFalse);
   return result.errors.join('\n');
 }
@@ -79,92 +79,74 @@ List<int> ints(String source, String name) {
 
 void main() {
   group('generator', () {
-    test(
-      'emits literals, obfuscated values that decode, and defaults',
-      () async {
-        final out = await generate(validEnv);
-        expect(out, contains('// ignore_for_file: type=lint'));
-        expect(
-          out,
-          contains('// generated_from: test/env.schema.json, test/.env'),
-        );
-        expect(out, contains('abstract final class Env {'));
-        expect(out, contains("static const String appOrigin = 'myapp';"));
-        expect(
-          out,
-          contains("static const String host = 'https://in9.example';"),
-        );
-        expect(out, contains("static const String optionalKey = '';"));
-        expect(out, contains('  /// The project key.\n'));
-        expect(
-          out,
-          contains('static final String apiKey = String.fromCharCodes('),
-        );
-        expect(out, isNot(contains('phc_abc123')));
-        final key = ints(out, '_keyApiKey');
-        final data = ints(out, '_dataApiKey');
-        final decoded = String.fromCharCodes([
-          for (var i = 0; i < data.length; i++) data[i] ^ key[i],
-        ]);
-        expect(decoded, 'phc_abc123');
-        expect(out, isNot(contains('UNRELATED')));
-      },
-    );
-
-    test('fails on a missing required key, naming the key only', () async {
-      final errors = await failure(
-        "APP_ORIGIN='myapp'\nHOST=https://in9.example\n",
+    test('emits literals, obfuscated values that decode, and blanks', () async {
+      final out = await generate(validValues);
+      expect(out, contains('// ignore_for_file: type=lint'));
+      expect(
+        out,
+        contains('// generated_from: test/env.schema.json, test/.env.json'),
       );
-      expect(errors, contains('API_KEY: missing from test/.env'));
-      expect(errors, isNot(contains('myapp')));
+      expect(out, contains('abstract final class Env {'));
+      expect(out, contains("static const String appOrigin = 'myapp';"));
+      expect(
+        out,
+        contains("static const String host = 'https://in9.example';"),
+      );
+      expect(out, contains("static const String optionalKey = '';"));
+      expect(out, contains('  /// The project key.\n'));
+      expect(
+        out,
+        contains('static final String apiKey = String.fromCharCodes('),
+      );
+      expect(out, isNot(contains('phc_abc123')));
+      final key = ints(out, '_keyApiKey');
+      final data = ints(out, '_dataApiKey');
+      final decoded = String.fromCharCodes([
+        for (var i = 0; i < data.length; i++) data[i] ^ key[i],
+      ]);
+      expect(decoded, 'phc_abc123');
+      expect(out, isNot(contains('UNRELATED')));
     });
 
-    test('fails on a malformed value without echoing it', () async {
-      final errors = await failure(
-        "APP_ORIGIN='myapp'\nAPI_KEY=phx_secret\nHOST=not a url\n",
+    test('bakes a value as given, validating nothing', () async {
+      final out = await generate(
+        r"""{"APP_ORIGIN": "other", "HOST": "it's $HOME"}""",
       );
-      expect(errors, contains('API_KEY: does not match'));
-      expect(errors, contains('HOST: is not a URI'));
-      expect(errors, isNot(contains('phx_secret')));
+      expect(out, contains("static const String appOrigin = 'other';"));
+      expect(out, contains(r"static const String host = 'it\'s \$HOME';"));
+      expect(out, contains("static const String apiKey = '';"));
+    });
+
+    test('fails on a non-string value, naming the key only', () async {
+      final errors = await failure('{"API_KEY": ["phc_leaked"]}');
+      expect(errors, contains('test/.env.json: API_KEY: the value must be'));
+      expect(errors, isNot(contains('phc_leaked')));
     });
   });
 
-  group('parseDotenv', () {
-    test('handles quotes, comments, export and duplicates', () {
-      final values = parseDotenv('''
-export A='it\\'s'
-B="line\\nbreak" # trailing
-C=plain # comment
-C=second
-# D=commented
-E=
-''');
-      expect(values, {'A': "it's", 'B': 'line\nbreak', 'C': 'plain', 'E': ''});
+  group('parseValues', () {
+    test('reads a JSON object of strings', () {
+      expect(parseValues('{"A": "1", "B": ""}'), {'A': '1', 'B': ''});
+    });
+
+    test('rejects anything but an object', () {
+      expect(() => parseValues('["A"]'), throwsFormatException);
     });
   });
 
-  group('validate', () {
-    const field = EnvField(
-      key: 'K',
-      required: true,
-      enumValues: ['a', 'bb'],
-      minLength: 1,
-      maxLength: 2,
-      patterns: ['^[a-z]+\$'],
-    );
-
-    test('accepts a value meeting every rule', () {
-      expect(validate(field, 'bb'), isEmpty);
-    });
-
-    test('reports each broken rule without the value', () {
-      final failures = validate(field, 'CCC');
-      expect(failures, hasLength(3));
-      expect(failures.join(), isNot(contains('CCC')));
+  group('parseSchema', () {
+    test('keeps declaration order and the generator hints', () {
+      final fields = parseSchema(schema);
+      expect(
+        [for (final f in fields) f.key],
+        ['APP_ORIGIN', 'API_KEY', 'OPTIONAL_KEY', 'HOST'],
+      );
+      expect(fields[1].obfuscate, isTrue);
+      expect(fields[1].description, 'The project key.');
     });
 
     test('fieldName is the camelCase of the key', () {
-      const f = EnvField(key: 'REVENUECAT_TEST_API_KEY', required: false);
+      const f = EnvField(key: 'REVENUECAT_TEST_API_KEY');
       expect(f.fieldName, 'revenuecatTestApiKey');
     });
   });
